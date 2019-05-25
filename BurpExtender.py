@@ -1,8 +1,3 @@
-#
-# 
-#
-# Copyright (c) 2019 Frans Hendrik Botes.
-#
 from burp import IBurpExtender, IScannerCheck, IScanIssue
 from burp import IMessageEditorTab  
 from burp import IContextMenuFactory
@@ -43,54 +38,70 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab, IHttpListener, IMes
         #setup the extension
         callbacks.setExtensionName('ExampleExtension')
 
-      
+        # main split pane
+        self._splitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
+
+        # table of log entries
+        logTable = Table(self)
+        scrollPane = JScrollPane(logTable)
+        self._splitpane.setLeftComponent(scrollPane)
+        # Setup the tab for the results
+        tabs = JTabbedPane()
+        linkResults_tab = self.set_linkResults_tab(functionality_name, test_name)
+        self._resultsViewer = callbacks.createMessageEditor(self, False)
+        tabs.addTab("Results", linkResults_tab)
+        self._splitpane.setRightComponent(tabs)
+
         stdout = PrintWriter(callbacks.getStdout(), True)
         stderr = PrintWriter(callbacks.getStderr(), True)
 
         #callbacks.registerScannerCheck(self)
         callbacks.registerContextMenuFactory(self)
 
-           
+        # customize our UI components
+        callbacks.customizeUiComponent(self._splitpane)
+        callbacks.customizeUiComponent(logTable)
+        callbacks.customizeUiComponent(scrollPane)
+        callbacks.customizeUiComponent(tabs)
+        
+        # add the custom tab to Burp's UI
+        callbacks.addSuiteTab(self)
+      
         return
 
+    def getTabCaption(self):
+        return 'BurpExtension'
+    
+    def getUiComponent(self):
+        return self._splitpane
 
     def createMenuItems(self, invocation):
         self.context = invocation
         menu_list = ArrayList()
-        menu_list.add(JMenuItem("Send to Tab", actionPerformed=self.scanItem))
+        menu_list.add(JMenuItem("Send to BurpExtension", actionPerformed=self.scanItem))
         return menu_list
 
     def scanItem(self, event):      
         # Regex used
-    
+      
+        
+       
         httpTraffic = self.context.getSelectedMessages()
 
         validTraffic = []
         self.paramlist = []
         hostUrls = []
     
-        #Only test JS files and build valid array list.
+        #Only test JS files.
         for traffic in httpTraffic:
             try:
                 url = str(traffic.getUrl())
                 if ".js" in url:
                     print 'Valid url: '
                     print url + '\n'
-                    response = bytesToString(traffic.getResponse())
-                    p = Pattern.compile('.**', Pattern.DOTALL)
-                    m = p.matcher(response)
-                    # Check match for html pages only
-                    # XXX: Java string are automatically boxed into python unicode objects,
-                    #      therefore is not possible to use the contains method anymore.
-                    #      In order to check if a substring is present in a string, we need
-                    #      to use the in operator.
-                    if "<js" in response and not m.matches():
-                        # The page does NOT contain any SRI attribute
-                        issues = ArrayList()
-                        issues.add(BLF(traffic))
-                        return issues
+                    hostUrls.append(str(traffic.getUrl()))
+                    validTraffic.append(traffic)
 
-            
             except UnicodeEncodeError:
                 continue
 
@@ -102,56 +113,54 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab, IHttpListener, IMes
         else:
             return 0
 
+    #
+    # extend AbstractTableModel
+    #
+    
+    def getRowCount(self):
+        try:
+            return self._log.size()
+        except:
+            return 0
+
+    def getColumnCount(self):
+        return 1
+
+    def getColumnName(self, columnIndex):
+        if columnIndex == 0:
+            return "URL"
+        return ""
+
+    def getValueAt(self, rowIndex, columnIndex):
+        logEntry = self._log.get(rowIndex)
+        if columnIndex == 0:
+            return logEntry._url.toString()
+        return ""
 
 
-class BLF(IScanIssue):
-    def __init__(self, reqres):
-        self.reqres = reqres
+    def set_linkResults_tab(self, fn, vn):
+        resource_text = ""
 
-    def getHost(self):
-        return self.reqres.getHost()
+        for url in resource_urls:
+            resource_text = resource_text + str(url) + "\n"
 
-    def getPort(self):
-        return self.reqres.getPort()
+        resource_textarea = JTextArea()
+        resource_textarea.setLineWrap(True)
+        resource_textarea.setWrapStyleWord(True)
+        resource_textarea.setText(resource_text)
+        resources_panel = JScrollPane(resource_textarea)
 
-    def getProtocol(self):
-        return self.reqres.getProtocol()
+        return resources_panel
 
-    def getUrl(self):
-        return self.reqres.getUrl()
+#
+# extend JTable to handle cell selection
+#
+    
+class Table(JTable):
 
-    def getIssueName(self):
-        return "Blank"
-
-    def getIssueType(self):
-        return 0x08000000  # See http:#portswigger.net/burp/help/scanner_issuetypes.html
-
-    def getSeverity(self):
-        return "Information"  # "High", "Medium", "Low", "Information" or "False positive"
-
-    def getConfidence(self):
-        return "Certain"  # "Certain", "Firm" or "Tentative"
-
-    def getIssueBackground(self):
-        return str("Some message about background for the issue....")
-
-    def getRemediationBackground(self):
-        return "this is an <b>informational</b> finding only.<br>"
-
-    def getIssueDetail(self):
-        return str("Burp Scanner has not identified something in the following page: <b>"
-                      "%s</b><br><br>" % (self.reqres.getUrl().toString()))
-
-    def getRemediationDetail(self):
-        return None
-
-    def getHttpMessages(self):
-        # XXX: Jython arrays are automatically boxed in Java arrays when the
-        #      function returns
-        rra = [self.reqres]
-        return rra
-
-    def getHttpService(self):
-        return self.reqres.getHttpService()
-  
+    def __init__(self, extender):
+        self._extender = extender
+        self.setModel(extender)
+        return
+    
     
